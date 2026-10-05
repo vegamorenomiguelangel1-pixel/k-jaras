@@ -123,8 +123,9 @@ h3 { font-size: 1.02rem; }
   margin-top: 8px;
   color: var(--brand);
   font-weight: 650;
-  text-transform: capitalize;
 }
+
+.eyebrow::first-letter { text-transform: uppercase; }
 
 .lede { margin: 8px 0 16px; color: var(--muted); }
 

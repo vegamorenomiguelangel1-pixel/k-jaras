@@ -1,10 +1,68 @@
 rules_version = '2';
-// Cada persona solo puede leer y escribir su propio documento users/{uid}.
-// Sin sesión, nadie entra. La clave de la app web no alcanza para ver los pedidos.
+// La venta es una sola, compartida por el equipo.
+// Solo entra quien tiene sesión y un documento en miembros.
+// El administrador es la persona apuntada por sistema/admin.
+// El primer alta puede crear ese documento mientras no exista.
 service cloud.firestore {
   match /databases/{database}/documents {
-    function esDueno(userId) {
-      return request.auth != null && request.auth.uid == userId;
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function adminPath() {
+      return /databases/$(database)/documents/sistema/admin;
+    }
+
+    function memberPath() {
+      return /databases/$(database)/documents/miembros/$(request.auth.uid);
+    }
+
+    function adminExists() {
+      return exists(adminPath());
+    }
+
+    function adminUid() {
+      return get(adminPath()).data.uid;
+    }
+
+    function memberExists() {
+      return signedIn() && exists(memberPath());
+    }
+
+    function memberRole() {
+      return get(memberPath()).data.role;
+    }
+
+    function esAdmin() {
+      return signedIn()
+        && adminExists()
+        && adminUid() == request.auth.uid
+        && memberExists()
+        && memberRole() == 'admin';
+    }
+
+    function esMiembro() {
+      return signedIn()
+        && adminExists()
+        && memberExists()
+        && (memberRole() == 'miembro' || adminUid() == request.auth.uid);
+    }
+
+    function nombreValido(nombre) {
+      return nombre is string && nombre.size() > 0 && nombre.size() <= 80;
+    }
+
+    function slugValido(slug) {
+      return slug is string
+        && slug.size() > 0
+        && slug.size() <= 48
+        && slug.matches('^[a-z0-9]+(-[a-z0-9]+)*$');
+    }
+
+    function fichaMiembro() {
+      return request.resource.data.keys().hasOnly(['nombre', 'role', 'slug'])
+        && nombreValido(request.resource.data.nombre)
+        && slugValido(request.resource.data.slug);
     }
 
     function datosValidos() {
@@ -30,10 +88,56 @@ service cloud.firestore {
         && datos.updatedAt is timestamp;
     }
 
+    match /sistema/admin {
+      allow get: if true;
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['uid', 'nombre'])
+        && request.resource.data.uid == request.auth.uid
+        && nombreValido(request.resource.data.nombre)
+        && !exists(adminPath());
+      allow update, delete: if false;
+    }
+
+    match /acceso/{slug} {
+      allow get: if slugValido(slug);
+      allow create, update: if esAdmin()
+        && request.resource.data.keys().hasOnly(['local'])
+        && slugValido(request.resource.data.local);
+      allow delete: if esAdmin();
+    }
+
+    match /miembros/{userId} {
+      allow get: if signedIn() && (request.auth.uid == userId || esAdmin());
+      allow list: if esAdmin();
+
+      allow create: if fichaMiembro() && (
+        (
+          signedIn()
+          && request.auth.uid == userId
+          && request.resource.data.role == 'admin'
+          && !exists(adminPath())
+        )
+        || (
+          esAdmin()
+          && request.resource.data.role == 'miembro'
+          && request.auth.uid != userId
+        )
+      );
+
+      allow delete: if esAdmin() && userId != request.auth.uid;
+      allow update: if false;
+    }
+
+    match /ventas/principal {
+      allow read: if esMiembro();
+      allow create, update: if esMiembro() && datosValidos();
+      allow delete: if false;
+    }
+
+    // Documento viejo, por persona. Solo se lee para copiarlo a la venta compartida.
     match /users/{userId} {
-      allow read: if esDueno(userId);
-      allow create, update: if esDueno(userId) && datosValidos();
-      allow delete: if esDueno(userId);
+      allow read: if signedIn() && request.auth.uid == userId;
+      allow write: if false;
     }
   }
 }

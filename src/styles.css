@@ -423,6 +423,10 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 
 .confirm-copy { margin: 4px 0 16px; }
 
+.member-row { align-items: center; justify-content: space-between; }
+.member-row p { margin: 2px 0 0; color: var(--muted); font-size: 0.85rem; }
+.member-row .btn { width: auto; flex: none; }
+
 .auth, .loading {
   min-height: 100dvh;
   display: grid;

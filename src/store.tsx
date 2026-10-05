@@ -8,18 +8,21 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { onAuthStateChanged, type User } from 'firebase/auth'
-import { doc, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore'
+import { onAuthStateChanged } from 'firebase/auth'
+import { doc, getDoc, onSnapshot, serverTimestamp, setDoc, type Firestore } from 'firebase/firestore'
 import { summarize, type Summary } from './calc'
 import {
-  emailPermitido,
   firestoreErrorMessage,
+  friendlyError,
   getServices,
   isFirebaseConfigured,
+  isPermissionDenied,
   signOutCurrent,
 } from './firebase'
 import { createInitialData } from './seed'
-import { loadEnvelope, parseAppData, saveEnvelope, type CacheEnvelope } from './storage'
+import { waitForSetup } from './setupLock'
+import { chooseInitialSale, loadEnvelope, parseAppData, saveEnvelope, type CacheEnvelope } from './storage'
+import { fetchSessionProfile, fetchSetupNeeded } from './team'
 import type { AppData, Expense, Order, Settings, ShoppingItem } from './types'
 import { AuthScreen } from './components/AuthScreen'
 import { LoadingScreen } from './components/ui'
@@ -31,8 +34,9 @@ interface StoreValue {
   offline: boolean
   saveStatus: SaveStatus
   saveError: string | null
-  userEmail: string | null
-  userName: string | null
+  memberName: string | null
+  esAdmin: boolean
+  userId: string | null
   data: AppData
   summary: Summary
   retrySave: () => void
@@ -132,8 +136,9 @@ function LocalStore({ children }: { children: ReactNode }) {
       offline: false,
       saveStatus: 'local',
       saveError: null,
-      userEmail: null,
-      userName: null,
+      memberName: null,
+      esAdmin: false,
+      userId: null,
       data,
       summary,
       retrySave: () => undefined,
@@ -146,9 +151,43 @@ function LocalStore({ children }: { children: ReactNode }) {
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
 }
 
-function CloudData({ user, children }: { user: User; children: ReactNode }) {
-  const cacheKey = `uid:${user.uid}`
-  const [data, setData] = useState<AppData>(() => loadEnvelope(cacheKey)?.data ?? createInitialData())
+const SALE_CACHE = 'venta:principal'
+const BLOCKED_NOTICE =
+  'No se pudo revisar el equipo. Cuando se publiquen las reglas nuevas, aquí se entra con nombre y código.'
+
+async function readLegacySale(db: Firestore, uid: string): Promise<CacheEnvelope | null> {
+  try {
+    const snap = await getDoc(doc(db, 'users', uid))
+    if (!snap.exists()) return null
+    const data = parseAppData(snap.data())
+    if (!data) return null
+    const raw = snap.data().clientUpdatedAt
+    return { clientUpdatedAt: typeof raw === 'number' ? raw : Date.now(), data }
+  } catch (error) {
+    console.error(error)
+    return null
+  }
+}
+
+function CloudData({
+  uid,
+  memberName,
+  esAdmin,
+  children,
+}: {
+  uid: string
+  memberName: string
+  esAdmin: boolean
+  children: ReactNode
+}) {
+  const cacheKey = SALE_CACHE
+  const [data, setData] = useState<AppData>(
+    () =>
+      loadEnvelope(cacheKey)?.data ??
+      loadEnvelope(`uid:${uid}`)?.data ??
+      loadEnvelope('local')?.data ??
+      createInitialData(),
+  )
   const [ready, setReady] = useState(false)
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved')
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -159,6 +198,7 @@ function CloudData({ user, children }: { user: User; children: ReactNode }) {
   const latestEnvelope = useRef<CacheEnvelope | null>(loadEnvelope(cacheKey))
   const persistRef = useRef<(envelope: CacheEnvelope) => Promise<void>>(async () => undefined)
   const created = useRef(false)
+  const loadGeneration = useRef(0)
 
   const schedule = useCallback(
     (next: AppData) => {
@@ -188,7 +228,7 @@ function CloudData({ user, children }: { user: User; children: ReactNode }) {
 
   useEffect(() => {
     const { db } = getServices()
-    const ref = doc(db, 'users', user.uid)
+    const ref = doc(db, 'ventas', 'principal')
     let cancelled = false
 
     async function persist(envelope: CacheEnvelope) {
@@ -218,25 +258,37 @@ function CloudData({ user, children }: { user: User; children: ReactNode }) {
       ref,
       (snap) => {
         if (cancelled) return
+        void (async () => {
+        if (cancelled) return
         if (!snap.exists()) {
-          if (created.current) {
+          if (snap.metadata.fromCache || created.current || pendingAt.current > 0) {
             setReady(true)
             return
           }
           created.current = true
-          const migrated = loadEnvelope(cacheKey) ?? loadEnvelope('local')
-          const initial = migrated?.data ?? createInitialData()
-          const envelope: CacheEnvelope = { clientUpdatedAt: Date.now(), data: initial }
+          const generation = ++loadGeneration.current
+          const fromLegacy = await readLegacySale(db, uid)
+          if (cancelled || generation !== loadGeneration.current) return
+          const chosen = chooseInitialSale(
+            [fromLegacy, loadEnvelope(cacheKey), loadEnvelope(`uid:${uid}`), loadEnvelope('local')],
+            createInitialData(),
+          )
+          const envelope: CacheEnvelope = {
+            clientUpdatedAt: chosen.clientUpdatedAt || Date.now(),
+            data: chosen.data,
+          }
           pendingAt.current = envelope.clientUpdatedAt
           latestEnvelope.current = envelope
           saveEnvelope(cacheKey, envelope)
-          dataRef.current = initial
-          setData(initial)
+          dataRef.current = envelope.data
+          setData(envelope.data)
           setReady(true)
           void persist(envelope)
           return
         }
 
+        loadGeneration.current += 1
+        created.current = true
         const parsed = parseAppData(snap.data())
         if (!parsed) {
           setSaveError('Los datos en la nube no tienen el formato de esta app.')
@@ -266,6 +318,7 @@ function CloudData({ user, children }: { user: User; children: ReactNode }) {
           setSaveStatus((current) => (current === 'error' ? current : 'saved'))
         }
         setReady(true)
+        })()
       },
       (error) => {
         console.error(error)
@@ -281,7 +334,7 @@ function CloudData({ user, children }: { user: User; children: ReactNode }) {
       unsubscribe()
       if (timer.current) window.clearTimeout(timer.current)
     }
-  }, [cacheKey, user.uid])
+  }, [cacheKey, uid])
 
   const retrySave = useCallback(() => {
     const envelope = latestEnvelope.current ?? loadEnvelope(cacheKey)
@@ -304,42 +357,91 @@ function CloudData({ user, children }: { user: User; children: ReactNode }) {
       offline,
       saveStatus,
       saveError,
-      userEmail: user.email,
-      userName: user.displayName,
+      memberName,
+      esAdmin,
+      userId: uid,
       data,
       summary,
       retrySave,
       signOutUser: signOutCurrent,
       ...actions,
     }),
-    [actions, data, offline, retrySave, saveError, saveStatus, summary, user.displayName, user.email],
+    [actions, data, esAdmin, memberName, offline, retrySave, saveError, saveStatus, summary, uid],
   )
 
-  if (!ready) return <LoadingScreen label="Cargando tus datos…" />
+  if (!ready) return <LoadingScreen label="Cargando la venta…" />
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
 }
 
 function CloudGate({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null | undefined>(undefined)
+  const [phase, setPhase] = useState<'loading' | 'setup' | 'auth' | 'app'>('loading')
+  const [blocked, setBlocked] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
+  const [session, setSession] = useState<{ uid: string; nombre: string; esAdmin: boolean } | null>(null)
 
   useEffect(() => {
-    const { auth } = getServices()
-    return onAuthStateChanged(auth, (next) => {
-      if (next && !emailPermitido(next.email)) {
-        setNotice('Esta cuenta no está autorizada. Solo puede entrar el correo indicado en la configuración.')
-        void signOutCurrent()
-        setUser(null)
-        return
-      }
-      if (next) setNotice(null)
-      setUser(next)
+    const { auth, db } = getServices()
+    let active = true
+    let request = 0
+    const unsubscribe = onAuthStateChanged(auth, (next) => {
+      const id = ++request
+      void (async () => {
+        await waitForSetup()
+        if (!active || id !== request) return
+        if (!next) {
+          setSession(null)
+          try {
+            const needsSetup = await fetchSetupNeeded(db)
+            if (!active || id !== request) return
+            setBlocked(false)
+            setPhase(needsSetup ? 'setup' : 'auth')
+          } catch (error) {
+            if (!active || id !== request) return
+            console.error(error)
+            setBlocked(true)
+            setNotice(isPermissionDenied(error) ? BLOCKED_NOTICE : friendlyError(error))
+            setPhase('auth')
+          }
+          return
+        }
+
+        try {
+          const profile = await fetchSessionProfile(db, next.uid)
+          if (!active || id !== request) return
+          if (!profile) {
+            setNotice('Esta cuenta no forma parte del equipo.')
+            setSession(null)
+            await signOutCurrent()
+            return
+          }
+          setBlocked(false)
+          setNotice(null)
+          setSession({ uid: next.uid, nombre: profile.nombre, esAdmin: profile.esAdmin })
+          setPhase('app')
+        } catch (error) {
+          if (!active || id !== request) return
+          console.error(error)
+          setSession(null)
+          setBlocked(true)
+          setNotice(isPermissionDenied(error) ? BLOCKED_NOTICE : friendlyError(error))
+          if (isPermissionDenied(error)) await signOutCurrent()
+          else setPhase('auth')
+        }
+      })()
     })
+    return () => {
+      active = false
+      unsubscribe()
+    }
   }, [])
 
-  if (user === undefined) return <LoadingScreen label="Conectando…" />
-  if (!user) return <AuthScreen notice={notice} />
-  return <CloudData user={user}>{children}</CloudData>
+  if (phase === 'loading') return <LoadingScreen label="Conectando…" />
+  if (phase !== 'app' || !session) return <AuthScreen notice={notice} setup={phase === 'setup'} blocked={blocked} />
+  return (
+    <CloudData uid={session.uid} memberName={session.nombre} esAdmin={session.esAdmin}>
+      {children}
+    </CloudData>
+  )
 }
 
 export function AppStore({ children }: { children: ReactNode }) {

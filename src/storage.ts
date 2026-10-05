@@ -176,6 +176,16 @@ export function saveEnvelope(scope: string, envelope: CacheEnvelope): void {
   }
 }
 
+export function chooseInitialSale(
+  sources: Array<CacheEnvelope | null | undefined>,
+  fallback: AppData,
+): CacheEnvelope {
+  for (const source of sources) {
+    if (source) return source
+  }
+  return { clientUpdatedAt: Date.now(), data: fallback }
+}
+
 export function foldText(value: string): string {
   return value
     .normalize('NFD')

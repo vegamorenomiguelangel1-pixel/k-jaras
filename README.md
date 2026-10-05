@@ -9,7 +9,7 @@ Los datos viven en **Cloud Firestore** (proyecto `k-jaras`, región `southameric
 ## Requisitos
 
 - [Node.js](https://nodejs.org/) 20 o más nuevo
-- Una cuenta de Google o un correo para entrar. En el proyecto ya están activos Google y correo/contraseña.
+- En Firebase Authentication tiene que seguir activo el método **correo y contraseña**. La pantalla no lo muestra: cada persona entra con su nombre y un código numérico.
 
 ## Ejecutar en la computadora
 
@@ -18,7 +18,7 @@ npm install
 npm run dev
 ```
 
-Abre [http://localhost:5173](http://localhost:5173). La app ya apunta al proyecto `k-jaras`: entra con Google o con correo y verás los mismos pedidos que en el celular. `localhost` tiene que estar en los dominios autorizados de Authentication (Firebase lo agrega solo).
+Abre [http://localhost:5173](http://localhost:5173). La app ya apunta al proyecto `k-jaras`. La primera vez, si todavía no hay administrador, la pantalla pide el nombre y el código de esa persona. Después, el equipo entra con los suyos. `localhost` tiene que estar en los dominios autorizados de Authentication (Firebase lo agrega solo).
 
 Para comprobar que los números cierran:
 
@@ -39,7 +39,7 @@ npm run preview
 - **Compras.** Ítems con cantidad, unidad, precio, subtotal y casilla de comprado. Puedes anotar lo que pagaste de verdad. Agregar, editar y eliminar.
 - **Gastos.** Concepto, monto, fecha y categoría (transporte, condimentos, aceite, mano de obra u otro).
 - **Pedidos.** Cliente, teléfono, dirección, platos, precio (empieza en Bs 40), hora, entrega, pago y método (efectivo o QR). Búsqueda, filtros, totales, enlace de WhatsApp (`wa.me` con +591) y enlace a Google Maps. Avisa si los pedidos pasan de los platos planificados.
-- **Configuración.** Precio, platos y fecha. Exportar e importar un respaldo JSON, exportar pedidos a CSV y restablecer los datos.
+- **Configuración.** Precio, platos y fecha. Exportar e importar un respaldo JSON, exportar pedidos a CSV y restablecer los datos. El administrador agrega y quita personas del equipo.
 
 ## Cómo se calculan los montos
 
@@ -62,14 +62,14 @@ Con la receta de 100 platos y sin gastos, las compras suman **Bs 1.577,85**, el 
 
 | Modo | Cuándo | Dónde |
 | --- | --- | --- |
-| Nube | Siempre, con el proyecto `k-jaras` | Documento `users/{uid}` en Firestore, más copia en este teléfono |
+| Nube | Siempre, con el proyecto `k-jaras` | Documento `ventas/principal` en Firestore, más copia en este teléfono |
 | Otro proyecto | Variables `VITE_FIREBASE_*` al compilar o en `.env.local` | El proyecto que indiquen esas variables |
 
-La primera vez que entras con una cuenta, si en ese teléfono ya había datos guardados solo en el navegador, se suben a tu documento. Cada cuenta solo ve lo suyo.
+Todo el equipo lee y escribe la misma venta. Si todavía existe la venta vieja de una sola persona (`users/{uid}`) y `ventas/principal` no existe, la primera entrada de esa persona la copia. Conviene que entre primero quien tenía los pedidos, para que no se cree antes una venta vacía.
 
-Si anotas en dos teléfonos a la vez, se queda el cambio más reciente.
+Si anotan en dos teléfonos a la vez, se queda el cambio más reciente.
 
-La configuración pública de la app web está en `src/firebaseConfig.ts`. La `apiKey` viaja dentro del sitio: así funciona Firebase y no es una contraseña. Quien no haya iniciado sesión no puede leer tus pedidos; eso lo impiden las reglas de `firestore.rules`. No subas `.env`, `.env.local` ni el JSON de una cuenta de servicio.
+La configuración pública de la app web está en `src/firebaseConfig.ts`. La `apiKey` viaja dentro del sitio: así funciona Firebase y no es una contraseña. Quien no esté en el equipo no puede leer los pedidos; eso lo impiden las reglas de `firestore.rules`. No subas `.env`, `.env.local` ni el JSON de una cuenta de servicio.
 
 ## Proyecto de Firebase
 
@@ -77,23 +77,23 @@ El proyecto ya está creado:
 
 - Identificador: `k-jaras`
 - Firestore en `southamerica-east1`
-- Authentication con Google y con correo/contraseña
+- Authentication con correo y contraseña, usado por dentro para el nombre y el código
 - Hosting: [https://k-jaras.web.app](https://k-jaras.web.app) y `https://k-jaras.firebaseapp.com`
 - Archivo `.firebaserc` con ese proyecto como predeterminado
 
 Esas claves públicas son el valor por defecto. Para apuntar a otro proyecto, copia `.env.example` a `.env.local` y llena solo los campos que quieras cambiar. Un campo vacío deja el valor de `k-jaras`.
 
-Opcional: en `VITE_ALLOWED_EMAIL` escribe tu correo. La app cierra la sesión si entra otra cuenta. Eso es una ayuda en el celular. El cierre de verdad está en las reglas: solo el usuario autenticado puede leer y escribir `users/{su uid}`. Para que además nadie más pueda crearse una cuenta útil, cambia `esDueno` en `firestore.rules` y pon tu correo:
+## Nombre y código
 
-```
-function esDueno(userId) {
-  return request.auth != null
-    && request.auth.uid == userId
-    && request.auth.token.email == 'tu-correo@gmail.com';
-}
-```
+La pantalla pide **Nombre** y **Código**. El código es un PIN numérico de 6 a 12 dígitos (Firebase exige al menos 6 caracteres en la contraseña). No hay botón de Google, ni “Crear cuenta”, ni “Olvidé mi código”.
 
-Ese cambio se publica con el deploy de abajo. En Authentication → Settings → Authorized domains tienen que estar `localhost`, `k-jaras.web.app` y `k-jaras.firebaseapp.com`.
+Por dentro, el nombre se vuelve un identificador (`Miguel Ángel` → `miguel-angel`) y se usa como cuenta de correo en Authentication, en el dominio `kjaras.app`. Ese correo no se muestra en la app. El código es la contraseña. En la consola de Firebase las cuentas se ven como correos; en el celular solo se ve el nombre.
+
+La primera persona que crea el administrador queda como admin. Está pensado para que lo haga Miguel en cuanto se publique esta versión, antes de pasar el enlace. Después, en **Configuración**, el administrador agrega al equipo con nombre y código, y puede quitar a alguien. Quitar y volver a agregar es la forma de cambiar un código: la cuenta vieja deja de poder entrar. Al agregar no se cierra la sesión del administrador.
+
+El equipo vive en la colección `miembros` (nombre y rol). `sistema/admin` apunta al administrador. `acceso/{nombre}` guarda solo el identificador interno necesario para entrar, nunca el código.
+
+En Authentication → Settings → Authorized domains tienen que estar `localhost`, `k-jaras.web.app` y `k-jaras.firebaseapp.com`. El proveedor de correo/contraseña tiene que seguir habilitado.
 
 ## Publicar
 
@@ -116,7 +116,7 @@ npm run build
 npx firebase-tools@14 deploy
 ```
 
-`firebase deploy` sube Hosting y `firestore.rules`. Si la ventana de Google no abre en el celular, entra con correo y contraseña.
+`firebase deploy` sube Hosting y `firestore.rules`. Después de publicarlo, la primera pantalla es la de crear al administrador, con nombre y código.
 
 ## Respaldo
 

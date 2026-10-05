@@ -5,10 +5,11 @@ import { decimalToInput, formatQuantity, parseDecimal, todayISO } from '../forma
 import { parseAppData } from '../storage'
 import { useStore } from '../store'
 import type { Settings as SettingsData } from '../types'
+import { TeamAdmin } from './TeamAdmin'
 import { Field, useConfirm } from './ui'
 
 export function Settings() {
-  const { data, mode, userEmail, setSettings, importData, resetData, signOutUser } = useStore()
+  const { data, mode, memberName, esAdmin, userId, setSettings, importData, resetData, signOutUser } = useStore()
   const [price, setPrice] = useState(decimalToInput(data.settings.pricePerPlate))
   const [plates, setPlates] = useState(String(data.settings.plannedPlates))
   const [date, setDate] = useState(data.settings.saleDate)
@@ -196,14 +197,19 @@ export function Settings() {
           Restablecer datos
         </button>
       </section>
+      {mode === 'cloud' && esAdmin && userId ? <TeamAdmin userId={userId} /> : null}
       <section className="stack">
         <h2>Dónde están los datos</h2>
         {mode === 'cloud' ? (
           <>
             <p>
-              En la nube, con Firestore, en tu cuenta {userEmail ? <strong>{userEmail}</strong> : ''}. Se sincronizan
-              entre dispositivos. También queda una copia en este teléfono por si no hay señal.
+              Entraste como <strong>{memberName}</strong>
+              {esAdmin ? ' (administrador)' : ''}. La venta está en la nube, compartida con el equipo, y también queda
+              una copia en este teléfono por si no hay señal.
             </p>
+            {esAdmin ? null : (
+              <p className="note">Si necesitas otro código, pídeselo al administrador.</p>
+            )}
             <button type="button" className="btn ghost" onClick={() => void signOutUser()}>
               Cerrar sesión
             </button>
@@ -212,7 +218,7 @@ export function Settings() {
           <p>
             Solo en este teléfono, porque no hay configuración de Firebase. Si borras los datos del navegador, se
             pierden. Exporta un JSON de vez en cuando. Cuando completes el archivo <code>.env.local</code>, la app
-            pedirá tu cuenta y subirá este respaldo la primera vez.
+            pedirá el nombre y el código, y subirá este respaldo la primera vez.
           </p>
         )}
       </section>

@@ -4,12 +4,12 @@ App para que Miguel Ángel organice la venta de k'jaras: lista de compras, gasto
 
 El plan inicial es **100 platos** el **viernes 9 de octubre de 2026** a **Bs 40** cada uno. Esa lista de compras ya viene cargada.
 
-Los datos viven en **Cloud Firestore** y se sincronizan entre el celular y la computadora. Firestore también guarda una caché en el teléfono para seguir anotando sin señal. Si todavía no configuraste Firebase, la app funciona igual y guarda todo en el navegador (`localStorage`).
+Los datos viven en **Cloud Firestore** (proyecto `k-jaras`, región `southamerica-east1`) y se sincronizan entre el celular y la computadora. Firestore también guarda una caché en el teléfono para seguir anotando sin señal. El sitio publicado está en [https://k-jaras.web.app](https://k-jaras.web.app).
 
 ## Requisitos
 
 - [Node.js](https://nodejs.org/) 20 o más nuevo
-- Un proyecto de Firebase, solo si quieres la nube (los pasos están más abajo)
+- Una cuenta de Google o un correo para entrar. En el proyecto ya están activos Google y correo/contraseña.
 
 ## Ejecutar en la computadora
 
@@ -18,9 +18,7 @@ npm install
 npm run dev
 ```
 
-Abre [http://localhost:5173](http://localhost:5173).
-
-Sin archivo `.env.local`, entras directo al resumen. Los datos quedan solo en ese navegador.
+Abre [http://localhost:5173](http://localhost:5173). La app ya apunta al proyecto `k-jaras`: entra con Google o con correo y verás los mismos pedidos que en el celular. `localhost` tiene que estar en los dominios autorizados de Authentication (Firebase lo agrega solo).
 
 Para comprobar que los números cierran:
 
@@ -64,45 +62,28 @@ Con la receta de 100 platos y sin gastos, las compras suman **Bs 1.577,85**, el 
 
 | Modo | Cuándo | Dónde |
 | --- | --- | --- |
-| Nube | Hay un `.env.local` (o secretos al compilar) con la config de Firebase | Documento `users/{uid}` en Firestore, más copia en este teléfono |
-| Teléfono | No hay config de Firebase | `localStorage` del navegador |
+| Nube | Siempre, con el proyecto `k-jaras` | Documento `users/{uid}` en Firestore, más copia en este teléfono |
+| Otro proyecto | Variables `VITE_FIREBASE_*` al compilar o en `.env.local` | El proyecto que indiquen esas variables |
 
-La primera vez que entras con una cuenta, si en ese teléfono ya había datos locales, se suben a tu documento. Cada cuenta solo ve lo suyo.
+La primera vez que entras con una cuenta, si en ese teléfono ya había datos guardados solo en el navegador, se suben a tu documento. Cada cuenta solo ve lo suyo.
 
 Si anotas en dos teléfonos a la vez, se queda el cambio más reciente.
 
-La clave de la app web (`apiKey`) viaja dentro del sitio: así funciona Firebase. No es una contraseña. Quien no haya iniciado sesión no puede leer tus pedidos; eso lo impiden las reglas de `firestore.rules`. Igual no subas `.env` ni `.env.local` a git.
+La configuración pública de la app web está en `src/firebaseConfig.ts`. La `apiKey` viaja dentro del sitio: así funciona Firebase y no es una contraseña. Quien no haya iniciado sesión no puede leer tus pedidos; eso lo impiden las reglas de `firestore.rules`. No subas `.env`, `.env.local` ni el JSON de una cuenta de servicio.
 
-## Crear el proyecto de Firebase
+## Proyecto de Firebase
 
-1. Entra a [Firebase console](https://console.firebase.google.com/) y crea un proyecto. Por ejemplo, `k-jaras`.
-2. En la página del proyecto, agrega una **app web** (el ícono `</>`). No hace falta Hosting en este paso. Copia el objeto `firebaseConfig`.
-3. Crea la base de datos: **Build → Firestore Database → Create database**. Elige el **modo producción** (las reglas de este repositorio son las que abren el acceso, y solo al dueño). Como ubicación, `southamerica-east1` (São Paulo) queda más cerca de Bolivia.
-4. Activa la entrada: **Build → Authentication → Sign-in method**.
-   - **Google:** actívalo y elige un correo de soporte.
-   - **Correo electrónico/contraseña:** actívalo.
-5. En **Authentication → Settings → Authorized domains** deja `localhost`. Más adelante agrega el dominio donde publiques (`tu-proyecto.web.app`, `tu-proyecto.firebaseapp.com` y, si usas GitHub Pages, `tu-usuario.github.io`).
-6. En la carpeta del proyecto:
+El proyecto ya está creado:
 
-   ```bash
-   cp .env.example .env.local
-   ```
+- Identificador: `k-jaras`
+- Firestore en `southamerica-east1`
+- Authentication con Google y con correo/contraseña
+- Hosting: [https://k-jaras.web.app](https://k-jaras.web.app) y `https://k-jaras.firebaseapp.com`
+- Archivo `.firebaserc` con ese proyecto como predeterminado
 
-   Completa `.env.local` con los valores de la app web:
+Esas claves públicas son el valor por defecto. Para apuntar a otro proyecto, copia `.env.example` a `.env.local` y llena solo los campos que quieras cambiar. Un campo vacío deja el valor de `k-jaras`.
 
-   | Variable | Campo de `firebaseConfig` |
-   | --- | --- |
-   | `VITE_FIREBASE_API_KEY` | `apiKey` |
-   | `VITE_FIREBASE_AUTH_DOMAIN` | `authDomain` |
-   | `VITE_FIREBASE_PROJECT_ID` | `projectId` |
-   | `VITE_FIREBASE_STORAGE_BUCKET` | `storageBucket` |
-   | `VITE_FIREBASE_MESSAGING_SENDER_ID` | `messagingSenderId` |
-   | `VITE_FIREBASE_APP_ID` | `appId` |
-
-7. Opcional: en `VITE_ALLOWED_EMAIL` escribe tu correo. La app cierra la sesión si entra otra cuenta. Eso es una ayuda en el celular; el cierre de verdad está en las reglas (paso siguiente).
-8. Arranca de nuevo con `npm run dev`. Entra con Google o crea la cuenta con tu correo. La primera vez se crea tu documento con la lista de 100 platos.
-
-Las reglas de `firestore.rules` dicen: solo el usuario autenticado puede leer y escribir `users/{su uid}`. Nadie más, aunque tenga la `apiKey`. Para que además nadie más pueda crearse una cuenta útil, cambia la función `esDueno` por esta y pon tu correo:
+Opcional: en `VITE_ALLOWED_EMAIL` escribe tu correo. La app cierra la sesión si entra otra cuenta. Eso es una ayuda en el celular. El cierre de verdad está en las reglas: solo el usuario autenticado puede leer y escribir `users/{su uid}`. Para que además nadie más pueda crearse una cuenta útil, cambia `esDueno` en `firestore.rules` y pon tu correo:
 
 ```
 function esDueno(userId) {
@@ -112,37 +93,30 @@ function esDueno(userId) {
 }
 ```
 
-Ese cambio llega a Firebase cuando haces el deploy del paso de abajo.
+Ese cambio se publica con el deploy de abajo. En Authentication → Settings → Authorized domains tienen que estar `localhost`, `k-jaras.web.app` y `k-jaras.firebaseapp.com`.
 
-## Publicar con Firebase Hosting
+## Publicar
 
-Hace falta [una cuenta de Google](https://firebase.google.com/) en la que ya creaste el proyecto.
+Cada push a `main` ejecuta `.github/workflows/firebase-hosting.yml`: corre las pruebas, compila con la base `/` y publica el sitio (`dist`, con reescritura de SPA a `index.html`) y las reglas de Firestore.
+
+Hace falta un secreto del repositorio:
+
+1. En [Firebase console](https://console.firebase.google.com/project/k-jaras/settings/serviceaccounts/adminsdk) abre la configuración del proyecto → **Cuentas de servicio** → **Generar nueva clave privada**. Se descarga un JSON. No lo subas a git.
+2. En GitHub abre **Settings → Secrets and variables → Actions → New repository secret**.
+3. Nombre: `FIREBASE_SERVICE_ACCOUNT_K_JARAS`. Valor: el contenido completo de ese JSON.
+4. Al juntar cambios en `main`, el flujo publica [https://k-jaras.web.app](https://k-jaras.web.app).
+
+La cuenta de servicio que genera Firebase (firebase-adminsdk) puede desplegar Hosting y las reglas. Si creas otra, dale los roles **Firebase Hosting Admin** y **Firebase Rules Admin**.
+
+También puedes publicar desde tu computadora, con el mismo `.firebaserc`:
 
 ```bash
 npx firebase-tools@14 login
-npx firebase-tools@14 use --add
 npm run build
 npx firebase-tools@14 deploy
 ```
 
-`firebase use --add` elige el proyecto y guarda `.firebaserc` en tu máquina. `firebase deploy` publica dos cosas: el sitio (`dist`) y las reglas de Firestore.
-
-Al terminar, la consola muestra una dirección como `https://tu-proyecto.web.app`. Ábrela en el celular e inicia sesión con la misma cuenta: vas a ver los mismos pedidos.
-
-Si Google no abre la ventana en el celular, entra con correo y contraseña. El dominio del sitio tiene que estar en **Authorized domains**.
-
-## Publicar en GitHub Pages
-
-El flujo ya está en `.github/workflows/pages.yml`. Se ejecuta al hacer push a `main` (y también se puede lanzar a mano).
-
-1. En el repositorio de GitHub abre **Settings → Pages**.
-2. En **Build and deployment → Source** elige **GitHub Actions**.
-3. Si quieres que esa copia también use Firestore, crea secretos del repositorio (**Settings → Secrets and variables → Actions**) con los mismos nombres que en `.env.example`: `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_FIREBASE_MESSAGING_SENDER_ID`, `VITE_FIREBASE_APP_ID` y, si lo usas, `VITE_ALLOWED_EMAIL`. Vite los mete en el sitio al compilar. Sin secretos, la copia de Pages queda en modo teléfono.
-4. Junta los cambios en `main` (o lanza el flujo a mano en la pestaña Actions).
-5. El sitio queda en `https://<usuario>.github.io/k-jaras/`.
-6. Agrega `<usuario>.github.io` a los dominios autorizados de Authentication.
-
-Puedes usar Pages y Firebase Hosting a la vez. Las dos copias hablan con la misma base si se compilaron con la misma configuración.
+`firebase deploy` sube Hosting y `firestore.rules`. Si la ventana de Google no abre en el celular, entra con correo y contraseña.
 
 ## Respaldo
 

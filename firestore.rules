@@ -1,0 +1,39 @@
+rules_version = '2';
+// Cada persona solo puede leer y escribir su propio documento users/{uid}.
+// Sin sesión, nadie entra. La clave de la app web no alcanza para ver los pedidos.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function esDueno(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    function datosValidos() {
+      let datos = request.resource.data;
+      return datos.version == 1
+        && datos.settings is map
+        && datos.settings.pricePerPlate is number
+        && datos.settings.pricePerPlate >= 0
+        && datos.settings.pricePerPlate <= 1000000
+        && datos.settings.plannedPlates is number
+        && datos.settings.plannedPlates >= 1
+        && datos.settings.plannedPlates <= 100000
+        && datos.settings.saleDate is string
+        && datos.settings.saleDate.size() > 0
+        && datos.settings.saleDate.size() <= 40
+        && datos.shoppingItems is list
+        && datos.shoppingItems.size() <= 400
+        && datos.expenses is list
+        && datos.expenses.size() <= 2000
+        && datos.orders is list
+        && datos.orders.size() <= 5000
+        && datos.clientUpdatedAt is number
+        && datos.updatedAt is timestamp;
+    }
+
+    match /users/{userId} {
+      allow read: if esDueno(userId);
+      allow create, update: if esDueno(userId) && datosValidos();
+      allow delete: if esDueno(userId);
+    }
+  }
+}

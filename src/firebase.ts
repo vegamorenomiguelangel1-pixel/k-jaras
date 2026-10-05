@@ -18,37 +18,21 @@ import {
   type Firestore,
 } from 'firebase/firestore'
 
-export interface FirebasePublicConfig {
-  apiKey: string
-  authDomain: string
-  projectId: string
-  storageBucket: string
-  messagingSenderId: string
-  appId: string
-}
+import { resolveFirebaseConfig, type FirebasePublicConfig } from './firebaseConfig'
+
+export type { FirebasePublicConfig }
 
 function clean(value: string | undefined): string {
   return value?.trim() ?? ''
 }
 
-export function readFirebaseConfig(): FirebasePublicConfig | null {
-  const apiKey = clean(import.meta.env.VITE_FIREBASE_API_KEY)
-  const authDomain = clean(import.meta.env.VITE_FIREBASE_AUTH_DOMAIN)
-  const projectId = clean(import.meta.env.VITE_FIREBASE_PROJECT_ID)
-  const appId = clean(import.meta.env.VITE_FIREBASE_APP_ID)
-  if (!apiKey || !authDomain || !projectId || !appId) return null
-  return {
-    apiKey,
-    authDomain,
-    projectId,
-    storageBucket: clean(import.meta.env.VITE_FIREBASE_STORAGE_BUCKET),
-    messagingSenderId: clean(import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID),
-    appId,
-  }
+export function readFirebaseConfig(): FirebasePublicConfig {
+  return resolveFirebaseConfig(import.meta.env)
 }
 
 export function isFirebaseConfigured(): boolean {
-  return readFirebaseConfig() !== null
+  const config = readFirebaseConfig()
+  return Boolean(config.apiKey && config.authDomain && config.projectId && config.appId)
 }
 
 export function allowedEmail(): string {
@@ -67,7 +51,7 @@ let db: Firestore | null = null
 
 export function getServices(): { auth: Auth; db: Firestore } {
   const config = readFirebaseConfig()
-  if (!config) throw new Error('Firebase no está configurado')
+  if (!config.apiKey || !config.projectId) throw new Error('Firebase no está configurado')
   if (!app || !auth || !db) {
     app = getApps().length ? getApp() : initializeApp(config)
     auth = getAuth(app)
